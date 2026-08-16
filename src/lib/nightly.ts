@@ -5,10 +5,12 @@ import { sendStoryReadyEmail } from "./email";
 import { isChildDue } from "./schedule";
 import {
   SafetyError,
+  composeEvergreen,
   composeStory,
   makeNightlySeed,
   StoryPreferencesSchema,
   updateContinuity,
+  type ComposedStory,
   type StoryRequest,
 } from "./story-engine";
 
@@ -30,7 +32,8 @@ export interface NightlyRunResult {
   generated: number;
   skipped: number;
   failed: number;
-  blocked: number; // rejected by the safety review
+  blocked: number; // personalised story blocked/failed
+  fallback: number; // served a pre-vetted evergreen story instead
   details: Array<{ childId: string; status: string; error?: string }>;
 }
 
@@ -74,6 +77,7 @@ export async function runNightly(opts?: {
     skipped: 0,
     failed: 0,
     blocked: 0,
+    fallback: 0,
     details: [],
   };
 
@@ -122,99 +126,81 @@ export async function runNightly(opts?: {
         withIllustrations: plan.withIllustrations,
       });
 
-      // Persist story + assets + continuity in one go.
-      await prisma.$transaction(async (tx) => {
-        await tx.storyAsset.deleteMany({ where: { storyId: story.id } });
-
-        await tx.story.update({
-          where: { id: story.id },
-          data: {
-            status: "READY",
-            title: composed.title,
-            synopsis: composed.synopsis,
-            bodyMarkdown: composed.bodyMarkdown,
-            wordCount: composed.wordCount,
-            readMinutes: composed.readMinutes,
-            seed,
-            model: composed.model,
-            themeOfNight: prefs.themes[0],
-            promptMeta: {
-              plan: plan.id,
-              safety: { attempts: composed.attempts, categories: composed.safety.categories },
-            },
-          },
-        });
-
-        if (composed.narration) {
-          await tx.storyAsset.create({
-            data: {
-              storyId: story.id,
-              type: "AUDIO",
-              url: composed.narration.url,
-              meta: { voice: composed.narration.voice },
-            },
-          });
-        }
-        for (const img of composed.illustrations) {
-          await tx.storyAsset.create({
-            data: {
-              storyId: story.id,
-              type: "IMAGE",
-              url: img.url,
-              sceneIndex: img.sceneIndex,
-              meta: { prompt: img.prompt },
-            },
-          });
-        }
-
-        await tx.child.update({
-          where: { id: child.id },
-          data: {
-            continuity: updateContinuity(child.continuity, forDateStr, composed),
-          },
-        });
+      await persistComposed({
+        storyId: story.id,
+        childId: child.id,
+        forDateStr,
+        seed,
+        planId: plan.id,
+        source: "PERSONALISED",
+        themeOfNight: prefs.themes[0],
+        composed,
+        childContinuity: child.continuity,
       });
-
-      // Deliver by email (best-effort).
-      if (deliverEmail && child.user.email) {
-        try {
-          await sendStoryReadyEmail({
-            to: child.user.email,
-            childName: child.name,
-            title: composed.title,
-            synopsis: composed.synopsis,
-            readUrl: `${APP_URL}/dashboard/story/${story.id}`,
-          });
-          await prisma.story.update({
-            where: { id: story.id },
-            data: { status: "DELIVERED", deliveredAt: new Date() },
-          });
-        } catch (e) {
-          console.error("[nightly] email failed:", (e as Error).message);
-        }
-      }
+      await deliverStory({ deliverEmail, child, storyId: story.id, composed });
 
       result.generated++;
       result.details.push({ childId: child.id, status: "generated" });
     } catch (e) {
       const message = (e as Error).message;
-      // A safety block is a content decision, not a technical failure: mark it
-      // BLOCKED (never delivered) and do not auto-retry on later runs.
       const isBlock = e instanceof SafetyError;
-      if (isBlock) {
-        result.blocked++;
-        result.details.push({ childId: child.id, status: "blocked", error: message });
-      } else {
-        result.failed++;
-        result.details.push({ childId: child.id, status: "failed", error: message });
-      }
-      await prisma.story
-        .update({
+
+      // The personalised story couldn't ship. Rather than leave the child with
+      // nothing, serve a pre-vetted evergreen story for tonight.
+      try {
+        const { seed: fseed } = makeNightlySeed();
+        const composed = composeEvergreen({
+          child: { name: child.name, pronouns: child.pronouns },
+          forDate: forDateStr,
+          seed: fseed,
+        });
+        const row = await prisma.story.upsert({
           where: { childId_forDate: { childId: child.id, forDate } },
-          data: { status: isBlock ? "BLOCKED" : "FAILED", error: message },
-        })
-        .catch(() => {});
-      console.error(`[nightly] child ${child.id} ${isBlock ? "blocked" : "failed"}:`, message);
+          create: { childId: child.id, forDate, status: "GENERATING" },
+          update: {},
+        });
+        await persistComposed({
+          storyId: row.id,
+          childId: child.id,
+          forDateStr,
+          seed: fseed,
+          planId: child.user.subscription?.plan ?? "STANDARD",
+          source: "EVERGREEN",
+          composed,
+          childContinuity: child.continuity,
+          fallbackReason: message,
+        });
+        await deliverStory({ deliverEmail, child, storyId: row.id, composed });
+
+        result.fallback++;
+        result.details.push({
+          childId: child.id,
+          status: isBlock ? "blocked-fallback" : "failed-fallback",
+          error: message,
+        });
+        console.warn(
+          `[nightly] child ${child.id} ${isBlock ? "blocked" : "failed"}; served evergreen fallback: ${message}`
+        );
+      } catch (fe) {
+        // Even the fallback couldn't be served — record the original problem.
+        if (isBlock) {
+          result.blocked++;
+          result.details.push({ childId: child.id, status: "blocked", error: message });
+        } else {
+          result.failed++;
+          result.details.push({ childId: child.id, status: "failed", error: message });
+        }
+        await prisma.story
+          .update({
+            where: { childId_forDate: { childId: child.id, forDate } },
+            data: { status: isBlock ? "BLOCKED" : "FAILED", error: message },
+          })
+          .catch(() => {});
+        console.error(
+          `[nightly] child ${child.id} ${isBlock ? "blocked" : "failed"} and fallback failed:`,
+          (fe as Error).message
+        );
+      }
     }
   }
 
@@ -224,4 +210,109 @@ export async function runNightly(opts?: {
 function safeContinuity(value: unknown) {
   if (!value || typeof value !== "object") return undefined;
   return value as StoryRequest["continuity"];
+}
+
+/** Persist a composed story (+ any assets) and, for personalised stories, fold
+ * the night into the child's continuity — all in one transaction. */
+async function persistComposed(params: {
+  storyId: string;
+  childId: string;
+  forDateStr: string;
+  seed: string;
+  planId: string;
+  source: "PERSONALISED" | "EVERGREEN";
+  composed: ComposedStory;
+  childContinuity: unknown;
+  themeOfNight?: string;
+  fallbackReason?: string;
+}) {
+  const { composed, source } = params;
+  await prisma.$transaction(async (tx) => {
+    await tx.storyAsset.deleteMany({ where: { storyId: params.storyId } });
+
+    await tx.story.update({
+      where: { id: params.storyId },
+      data: {
+        status: "READY",
+        source,
+        error: null,
+        title: composed.title,
+        synopsis: composed.synopsis,
+        bodyMarkdown: composed.bodyMarkdown,
+        wordCount: composed.wordCount,
+        readMinutes: composed.readMinutes,
+        seed: params.seed,
+        model: composed.model,
+        themeOfNight: params.themeOfNight,
+        promptMeta:
+          source === "PERSONALISED"
+            ? {
+                plan: params.planId,
+                source,
+                safety: {
+                  attempts: composed.attempts,
+                  categories: composed.safety.categories,
+                },
+              }
+            : { plan: params.planId, source, fallbackReason: params.fallbackReason },
+      },
+    });
+
+    if (composed.narration) {
+      await tx.storyAsset.create({
+        data: {
+          storyId: params.storyId,
+          type: "AUDIO",
+          url: composed.narration.url,
+          meta: { voice: composed.narration.voice },
+        },
+      });
+    }
+    for (const img of composed.illustrations) {
+      await tx.storyAsset.create({
+        data: {
+          storyId: params.storyId,
+          type: "IMAGE",
+          url: img.url,
+          sceneIndex: img.sceneIndex,
+          meta: { prompt: img.prompt },
+        },
+      });
+    }
+
+    // Only bespoke stories shape the child's ongoing story world.
+    if (source === "PERSONALISED") {
+      await tx.child.update({
+        where: { id: params.childId },
+        data: {
+          continuity: updateContinuity(params.childContinuity, params.forDateStr, composed),
+        },
+      });
+    }
+  });
+}
+
+/** Best-effort email delivery; marks the story DELIVERED on success. */
+async function deliverStory(params: {
+  deliverEmail: boolean;
+  child: { name: string; user: { email: string | null } };
+  storyId: string;
+  composed: ComposedStory;
+}) {
+  if (!params.deliverEmail || !params.child.user.email) return;
+  try {
+    await sendStoryReadyEmail({
+      to: params.child.user.email,
+      childName: params.child.name,
+      title: params.composed.title,
+      synopsis: params.composed.synopsis,
+      readUrl: `${APP_URL}/dashboard/story/${params.storyId}`,
+    });
+    await prisma.story.update({
+      where: { id: params.storyId },
+      data: { status: "DELIVERED", deliveredAt: new Date() },
+    });
+  } catch (e) {
+    console.error("[nightly] email failed:", (e as Error).message);
+  }
 }

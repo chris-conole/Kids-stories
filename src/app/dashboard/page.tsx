@@ -99,12 +99,19 @@ export default async function DashboardPage({
                   href={`/dashboard/story/${story.id}`}
                   className="group rounded-2xl border border-night-100 bg-white p-5 shadow-sm transition hover:shadow-md"
                 >
-                  <div className="text-xs uppercase tracking-wide text-night-400">
-                    {new Date(story.forDate).toLocaleDateString("en-GB", {
-                      weekday: "short",
-                      day: "numeric",
-                      month: "short",
-                    })}
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs uppercase tracking-wide text-night-400">
+                      {new Date(story.forDate).toLocaleDateString("en-GB", {
+                        weekday: "short",
+                        day: "numeric",
+                        month: "short",
+                      })}
+                    </div>
+                    {story.source === "EVERGREEN" && (
+                      <span className="rounded-full bg-night-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-night-500">
+                        Cosy classic
+                      </span>
+                    )}
                   </div>
                   <h3 className="mt-1 font-display text-lg text-night-900 group-hover:text-night-700">
                     {story.title || "Tonight's story"}

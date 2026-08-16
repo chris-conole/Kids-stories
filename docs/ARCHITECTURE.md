@@ -66,9 +66,17 @@ past stories. Cheap, and enough for characters and threads to persist.
 - **Fail-closed by design.** An unsafe verdict blocks, and a classifier that
   keeps erroring is treated as unsafe — shipping unvetted content to a child is
   worse than a missed story. Toggle with `SAFETY_CHECK=off` for local testing.
+- **Evergreen fallback (implemented, `story-engine/evergreen.ts`).** If a night's
+  personalised story can't ship — blocked by safety, or a transient generation
+  error — the nightly job serves a hand-written, pre-vetted story instead,
+  lightly personalised with the child's name and pronouns. It's text-only and
+  calls no model/provider, so it works precisely when other things are failing.
+  Served stories are marked `source = EVERGREEN` (with the original reason in
+  `promptMeta.fallbackReason`); a night only ends `BLOCKED`/`FAILED` if the
+  fallback itself couldn't be written. Continuity is not polluted by fallbacks.
 - Future hardening: a parent "report this story" action that quarantines +
-  regenerates, and a gentle evergreen fallback so a blocked night still has a
-  story to read.
+  regenerates, and expanding the evergreen pool (more titles, closer to full
+  length).
 
 ## Scheduling for real bedtimes (implemented)
 
@@ -128,7 +136,9 @@ Plus price must clear image + audio spend with margin.
 2. ~~**Timezone-sharded scheduling.**~~ **Done** (`src/lib/schedule.ts`). Next:
    a per-child job queue with retries for scale.
 3. ~~**Safety second-pass classifier.**~~ **Done** (`story-engine/safety.ts`,
-   fail-closed, `BLOCKED` status). Next: a parent report/regenerate flow.
+   fail-closed, `BLOCKED` status) with an ~~**evergreen fallback**~~ **Done**
+   (`story-engine/evergreen.ts`) so a blocked night still has a story. Next: a
+   parent report/regenerate flow and a bigger evergreen pool.
 4. **Gift subscriptions** (grandparents are a huge segment).
 5. **Weekly printable keepsake PDF** of the family's favourite story.
 6. **Series mode** — multi-night arcs ("Amara and the Lantern Market, night 3").

@@ -1,4 +1,5 @@
 import { generateStory, STORY_MODEL } from "./generate";
+import { pickEvergreenStory, type EvergreenRequest } from "./evergreen";
 import { illustrateStory, type Illustration } from "./illustrate";
 import { narrateStory, type NarrationResult } from "./narrate";
 import {
@@ -20,6 +21,8 @@ export { makeNightlySeed } from "./seeds";
 export { targetWordCount } from "./prompt";
 export { SafetyError, classifyStory, safetyEnabled } from "./safety";
 export type { SafetyVerdict, SafetyCategory } from "./safety";
+export { pickEvergreenStory } from "./evergreen";
+export type { EvergreenRequest } from "./evergreen";
 
 export interface ComposedStory {
   model: string;
@@ -134,6 +137,33 @@ export async function composeStory(
     illustrations,
     safety,
     attempts,
+  };
+}
+
+/**
+ * Assemble a pre-vetted evergreen story as a ComposedStory. Text-only and no
+ * model/classifier call — this is the reliable fallback for a night when the
+ * personalised story can't be produced, so it must not depend on any provider.
+ */
+export function composeEvergreen(req: EvergreenRequest): ComposedStory {
+  const story = pickEvergreenStory(req);
+  const bodyMarkdown = scenesToMarkdown(story);
+  const wordCount = countWords(bodyMarkdown);
+  const readMinutes = Math.max(1, Math.round(wordCount / 135));
+
+  return {
+    model: "evergreen",
+    title: story.title,
+    synopsis: story.synopsis,
+    bodyMarkdown,
+    wordCount,
+    readMinutes,
+    continuityNote: undefined,
+    raw: story,
+    narration: null,
+    illustrations: [],
+    safety: { safe: true, categories: [] }, // pre-vetted
+    attempts: 0,
   };
 }
 

@@ -58,6 +58,13 @@ export default async function StoryReaderPage({
         </div>
       )}
 
+      {story.source === "EVERGREEN" && (
+        <div className="mt-4 rounded-xl bg-night-100 p-3 text-center text-sm text-night-600">
+          A cosy classic for tonight — {story.child.name}&apos;s own new adventure
+          is back tomorrow.
+        </div>
+      )}
+
       <article className="mt-6 rounded-2xl bg-white p-8 shadow-sm sm:p-12">
         <p className="text-sm uppercase tracking-wide text-night-400">
           For {story.child.name} ·{" "}

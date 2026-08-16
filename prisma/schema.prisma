@@ -137,6 +137,11 @@ enum StoryStatus {
   BLOCKED    // rejected by the second-pass safety review; never delivered
 }
 
+enum StorySource {
+  PERSONALISED // the child's bespoke, model-generated story
+  EVERGREEN    // a pre-vetted fallback served when personalisation couldn't ship
+}
+
 model Story {
   id      String @id @default(cuid())
   childId String
@@ -146,6 +151,7 @@ model Story {
   forDate DateTime
 
   status StoryStatus @default(PENDING)
+  source StorySource @default(PERSONALISED)
 
   title       String?
   bodyMarkdown String? // full story text, markdown with scene breaks
