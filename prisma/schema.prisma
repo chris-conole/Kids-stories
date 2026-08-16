@@ -1,0 +1,206 @@
+// Dreamloom data model
+// ─────────────────────────────────────────────────────────────
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Auth.js (NextAuth) standard models ─────────────────────────
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+
+  // Billing
+  stripeCustomerId String? @unique
+
+  accounts     Account[]
+  sessions     Session[]
+  children     Child[]
+  subscription Subscription?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ── Subscription / billing ─────────────────────────────────────
+enum Plan {
+  STANDARD // nightly text story
+  PLUS     // + illustrations + audio narration
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  INCOMPLETE
+}
+
+model Subscription {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  plan                 Plan               @default(STANDARD)
+  status               SubscriptionStatus @default(TRIALING)
+  stripeSubscriptionId String?            @unique
+  stripePriceId        String?
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean            @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ── Child profile + story preferences ──────────────────────────
+model Child {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name         String
+  pronouns     String  @default("they/them")
+  birthYear    Int? // used to derive age band; we never require exact DOB
+  readingLevel String  @default("early") // pre-reader | early | confident | advanced
+
+  // Structured preferences captured in onboarding. Stored as JSON so the
+  // preference set can evolve without a migration. Validated by Zod in
+  // src/lib/story-engine/types.ts (StoryPreferencesSchema).
+  preferences Json
+
+  // Light continuity "story bible": recurring characters + a rolling
+  // summary of recent adventures so nights can connect. Kept small on purpose.
+  continuity Json?
+
+  // Local bedtime, used to schedule generation ahead of time.
+  bedtimeLocal String @default("19:30") // "HH:mm"
+  timezone     String @default("Europe/London")
+
+  active  Boolean @default(true)
+  stories Story[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+// ── Stories ────────────────────────────────────────────────────
+enum StoryStatus {
+  PENDING    // queued for a given night
+  GENERATING
+  READY
+  DELIVERED
+  FAILED
+}
+
+model Story {
+  id      String @id @default(cuid())
+  childId String
+  child   Child  @relation(fields: [childId], references: [id], onDelete: Cascade)
+
+  // The night this story is for (date only, in the child's timezone).
+  forDate DateTime
+
+  status StoryStatus @default(PENDING)
+
+  title       String?
+  bodyMarkdown String? // full story text, markdown with scene breaks
+  synopsis    String? // one-line summary shown in the library
+  wordCount   Int?
+  readMinutes Int?
+
+  // Generation metadata (for debugging / reproducibility / continuity).
+  seed        String? // nightly randomness seed
+  model       String?
+  themeOfNight String?
+  promptMeta  Json? // snapshot of inputs used
+
+  assets   StoryAsset[]
+  feedback StoryFeedback?
+
+  deliveredAt DateTime?
+  error       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([childId, forDate])
+  @@index([status])
+}
+
+enum AssetType {
+  AUDIO
+  IMAGE
+  PDF
+}
+
+model StoryAsset {
+  id      String @id @default(cuid())
+  storyId String
+  story   Story  @relation(fields: [storyId], references: [id], onDelete: Cascade)
+
+  type       AssetType
+  url        String
+  sceneIndex Int? // for per-scene illustrations
+  meta       Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([storyId])
+}
+
+model StoryFeedback {
+  id      String @id @default(cuid())
+  storyId String @unique
+  story   Story  @relation(fields: [storyId], references: [id], onDelete: Cascade)
+
+  favourite Boolean @default(false)
+  rating    Int? // 1..5, optional
+  note      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
