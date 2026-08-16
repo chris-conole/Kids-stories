@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { draftToPreferences } from "@/components/prefs/controls";
 
 /**
  * Runs once after magic-link sign-in returns to /dashboard?onboard=1. Reads the
@@ -26,17 +27,7 @@ export function OnboardingCompleter() {
     (async () => {
       try {
         const draft = JSON.parse(raw);
-        const preferences = {
-          targetMinutes: draft.targetMinutes ?? 15,
-          tone: draft.tone?.length ? draft.tone : ["gentle"],
-          themes: draft.themes ?? [],
-          values: draft.values ?? [],
-          companions: draft.companions ?? [],
-          favouriteThings: draft.favouriteThings || undefined,
-          avoid: draft.avoid || undefined,
-          windDownEnding: draft.windDownEnding ?? true,
-          serialiseAdventures: draft.serialiseAdventures ?? true,
-        };
+        const preferences = draftToPreferences(draft);
 
         const res = await fetch("/api/children", {
           method: "POST",

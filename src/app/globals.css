@@ -22,3 +22,11 @@ body {
 .prose-story p {
   @apply mb-4;
 }
+
+/* Shared form input used by the onboarding wizard and the preference editor. */
+.input {
+  @apply w-full rounded-xl border border-night-200 px-4 py-2.5;
+}
+.input:focus {
+  @apply border-night-500 outline-none;
+}

@@ -5,6 +5,16 @@ import Link from "next/link";
 import { signIn } from "next-auth/react";
 import { Logo } from "@/components/Logo";
 import {
+  Chip,
+  CompanionsEditor,
+  Field,
+  Section,
+  Toggle,
+  emptyDraft,
+  useMultiToggle,
+  type PreferenceDraft,
+} from "@/components/prefs/controls";
+import {
   READING_LEVELS,
   THEME_OPTIONS,
   TONE_OPTIONS,
@@ -18,56 +28,17 @@ import {
  */
 
 const CURRENT_YEAR = new Date().getFullYear();
-
-interface Draft {
-  name: string;
-  pronouns: string;
-  birthYear?: number;
-  readingLevel: string;
-  themes: string[];
-  tone: string[];
-  values: string[];
-  companions: { name: string; relationship?: string }[];
-  favouriteThings: string;
-  avoid: string;
-  windDownEnding: boolean;
-  serialiseAdventures: boolean;
-  targetMinutes: number;
-}
-
-const emptyDraft: Draft = {
-  name: "",
-  pronouns: "they/them",
-  readingLevel: "early",
-  themes: [],
-  tone: ["gentle"],
-  values: [],
-  companions: [],
-  favouriteThings: "",
-  avoid: "",
-  windDownEnding: true,
-  serialiseAdventures: true,
-  targetMinutes: 15,
-};
-
 const STEPS = ["Your child", "Their worlds", "The feel", "Their world", "Finish"];
 
 export default function OnboardingPage() {
   const [step, setStep] = useState(0);
-  const [draft, setDraft] = useState<Draft>(emptyDraft);
+  const [draft, setDraft] = useState<PreferenceDraft>(emptyDraft);
   const [email, setEmail] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
-
-  const toggle = (key: "themes" | "tone" | "values", value: string, max: number) => {
-    const list = draft[key];
-    if (list.includes(value)) {
-      set({ [key]: list.filter((v) => v !== value) } as Partial<Draft>);
-    } else if (list.length < max) {
-      set({ [key]: [...list, value] } as Partial<Draft>);
-    }
-  };
+  const set = (patch: Partial<PreferenceDraft>) =>
+    setDraft((d) => ({ ...d, ...patch }));
+  const toggle = useMultiToggle(draft, set);
 
   const canProceed = () => {
     if (step === 0) return draft.name.trim().length > 0;
@@ -79,7 +50,6 @@ export default function OnboardingPage() {
   async function finish() {
     if (!email) return;
     setSubmitting(true);
-    // Stash the draft so we can create the child after magic-link sign-in.
     localStorage.setItem("dreamloom:onboarding", JSON.stringify(draft));
     await signIn("resend", { email, redirectTo: "/dashboard?onboard=1" });
   }
@@ -96,7 +66,6 @@ export default function OnboardingPage() {
           </span>
         </div>
 
-        {/* Progress */}
         <div className="mb-8 flex gap-1">
           {STEPS.map((_, i) => (
             <div
@@ -307,7 +276,6 @@ export default function OnboardingPage() {
             </Section>
           )}
 
-          {/* Nav */}
           {step < 4 && (
             <div className="mt-8 flex items-center justify-between">
               <button
@@ -328,162 +296,6 @@ export default function OnboardingPage() {
           )}
         </div>
       </div>
-
-      <style>{`
-        .input { width:100%; border:1px solid #c9cceb; border-radius:0.75rem; padding:0.65rem 0.9rem; }
-        .input:focus { outline:none; border-color:#5d5eb2; }
-      `}</style>
     </main>
-  );
-}
-
-function Section({
-  title,
-  subtitle,
-  children,
-}: {
-  title: string;
-  subtitle?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <h2 className="font-display text-2xl text-night-900">{title}</h2>
-      {subtitle && <p className="mt-1 text-night-500">{subtitle}</p>}
-      <div className="mt-6 space-y-5">{children}</div>
-    </div>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="block">
-      <span className="mb-1.5 block text-sm font-medium text-night-700">{label}</span>
-      {children}
-    </label>
-  );
-}
-
-function Chip({
-  active,
-  onClick,
-  children,
-  small,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-  small?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`rounded-full border text-left transition ${
-        small ? "px-3 py-1.5 text-sm" : "px-3 py-2.5 text-sm"
-      } ${
-        active
-          ? "border-night-600 bg-night-600 text-white"
-          : "border-night-200 bg-white text-night-700 hover:border-night-400"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
-function Toggle({
-  label,
-  hint,
-  checked,
-  onChange,
-}: {
-  label: string;
-  hint: string;
-  checked: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={() => onChange(!checked)}
-      className="flex w-full items-center justify-between rounded-xl border border-night-200 p-3 text-left"
-    >
-      <span>
-        <span className="font-medium text-night-900">{label}</span>
-        <span className="block text-sm text-night-500">{hint}</span>
-      </span>
-      <span
-        className={`ml-3 flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 ${
-          checked ? "bg-night-600" : "bg-night-200"
-        }`}
-      >
-        <span
-          className={`h-5 w-5 rounded-full bg-white transition ${
-            checked ? "translate-x-5" : ""
-          }`}
-        />
-      </span>
-    </button>
-  );
-}
-
-function CompanionsEditor({
-  companions,
-  onChange,
-}: {
-  companions: { name: string; relationship?: string }[];
-  onChange: (c: { name: string; relationship?: string }[]) => void;
-}) {
-  const [name, setName] = useState("");
-  const [rel, setRel] = useState("");
-
-  return (
-    <div>
-      <div className="flex flex-wrap gap-2">
-        {companions.map((c, i) => (
-          <span
-            key={i}
-            className="inline-flex items-center gap-1 rounded-full bg-night-100 px-3 py-1 text-sm text-night-700"
-          >
-            {c.name}
-            {c.relationship ? ` (${c.relationship})` : ""}
-            <button
-              onClick={() => onChange(companions.filter((_, j) => j !== i))}
-              className="text-night-400 hover:text-night-700"
-            >
-              ×
-            </button>
-          </span>
-        ))}
-      </div>
-      <div className="mt-2 flex gap-2">
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Name"
-          className="input flex-1"
-        />
-        <input
-          value={rel}
-          onChange={(e) => setRel(e.target.value)}
-          placeholder="e.g. puppy"
-          className="input flex-1"
-        />
-        <button
-          type="button"
-          onClick={() => {
-            if (name.trim() && companions.length < 5) {
-              onChange([...companions, { name: name.trim(), relationship: rel.trim() || undefined }]);
-              setName("");
-              setRel("");
-            }
-          }}
-          className="rounded-xl bg-night-100 px-4 font-medium text-night-700 hover:bg-night-200"
-        >
-          Add
-        </button>
-      </div>
-    </div>
   );
 }

@@ -68,8 +68,14 @@ export default async function ProfilePage() {
                 </div>
               )}
 
-              <div className="mt-5 flex gap-2">
+              <div className="mt-5 flex flex-wrap gap-2">
                 <GenerateNowButton childId={child.id} />
+                <Link
+                  href={`/dashboard/profile/${child.id}/edit`}
+                  className="rounded-full border border-night-300 px-4 py-2 text-sm font-medium text-night-700 hover:bg-night-50"
+                >
+                  Edit preferences
+                </Link>
               </div>
             </div>
           );
