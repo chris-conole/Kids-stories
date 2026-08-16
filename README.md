@@ -83,13 +83,16 @@ See `.env.example`. The essentials:
 
 ## Nightly generation
 
-The endpoint `POST /api/cron/nightly` (Bearer `CRON_SECRET`) generates tonight's
-story for every active subscriber. It's **idempotent per child per night**, so
-it's safe to re-run. `vercel.json` schedules it daily; see
-`docs/ARCHITECTURE.md` for timezone-sharded scheduling so each family's story is
-ready before their local bedtime.
+The endpoint `POST /api/cron/nightly` (Bearer `CRON_SECRET`) generates stories
+for subscribers. It runs **hourly** (`vercel.json`: `0 * * * *`) and is
+**timezone-sharded**: each run only generates for children whose local time has
+reached `bedtime − GENERATION_LEAD_MINUTES` (default 120), so every family's
+story is ready ahead of their own local bedtime. It's **idempotent per child per
+night**, so a child is generated once and skipped on later runs. Pass `?all=1`
+to bypass sharding for a manual backfill. See `docs/ARCHITECTURE.md` and
+`src/lib/schedule.ts` for details.
 
-Run it manually:
+Run it manually (processes all eligible children, no sharding):
 
 ```bash
 npm run cron:nightly

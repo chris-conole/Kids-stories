@@ -2,6 +2,7 @@ import { prisma } from "./db";
 import { ageBandFromBirthYear } from "./age";
 import { planFor } from "./plans";
 import { sendStoryReadyEmail } from "./email";
+import { isChildDue } from "./schedule";
 import {
   composeStory,
   makeNightlySeed,
@@ -40,10 +41,16 @@ export async function runNightly(opts?: {
   childId?: string; // limit to one child (manual "generate now")
   force?: boolean; // regenerate even if one exists
   deliverEmail?: boolean;
+  // When true, only generate for children whose local time has reached their
+  // pre-bedtime window (the hourly, timezone-sharded cron). When false/omitted,
+  // process every eligible child (a manual "generate all" / single-child run).
+  dueOnly?: boolean;
+  now?: Date;
 }): Promise<NightlyRunResult> {
   const deliverEmail = opts?.deliverEmail ?? true;
+  const now = opts?.now ?? new Date();
 
-  const children = await prisma.child.findMany({
+  const all = await prisma.child.findMany({
     where: {
       active: true,
       ...(opts?.childId ? { id: opts.childId } : {}),
@@ -56,6 +63,9 @@ export async function runNightly(opts?: {
     include: { user: { include: { subscription: true } } },
   });
 
+  // Timezone shard: keep only children currently in their generation window.
+  const children = opts?.dueOnly ? all.filter((c) => isChildDue(c, now)) : all;
+
   const result: NightlyRunResult = {
     attempted: 0,
     generated: 0,
@@ -66,7 +76,7 @@ export async function runNightly(opts?: {
 
   for (const child of children) {
     result.attempted++;
-    const forDateStr = nightDateString(child.timezone);
+    const forDateStr = nightDateString(child.timezone, now);
     const forDate = new Date(`${forDateStr}T00:00:00.000Z`);
 
     try {
