@@ -31,7 +31,7 @@ This is the part that makes a story feel written *for this child*.
 1. **The recipe** (`types.ts`) — a validated `StoryPreferences` object per child: reading level, tone, themes, values to gently encourage, companions (friends/pets/toys), favourite things, things to avoid, wind-down endings, and whether to serialise adventures.
 2. **The prompt** (`prompt.ts`) — a carefully designed system prompt encoding safety rules, reading-level control, **bedtime wind-down pacing**, and continuity, plus a per-night user prompt built from the recipe and a fresh randomness **seed** so no two nights repeat.
 3. **Generation** (`generate.ts`) — calls Claude, expects structured JSON (title, scenes, synopsis, continuity note), and validates it with Zod.
-4. **Media adapters** (`narrate.ts`, `illustrate.ts`) — provider-agnostic hooks for the Plus tier. Text always ships even if media fails.
+4. **Media adapters** (`narrate.ts`, `illustrate.ts`) — real, provider-agnostic media for the Plus tier: narration via **OpenAI TTS** or **ElevenLabs**, illustrations via **OpenAI Images** or **Replicate**, plus a `mock` provider to exercise the flow without keys. Generated files go through a storage layer (`storage.ts`: local FS for dev, **S3/R2** for production). Text always ships even if media fails.
 5. **Compose + continuity** (`index.ts`) — assembles the night and folds a short summary into the child's rolling "story bible" so recurring characters and past adventures carry over.
 
 **Try it in 30 seconds** (no DB or web app needed):
@@ -40,7 +40,20 @@ This is the part that makes a story feel written *for this child*.
 cp .env.example .env      # add ANTHROPIC_API_KEY
 npm install
 npm run story:sample      # prints a full generated story
+npm run media:sample      # writes mock narration + illustrations to public/generated
 ```
+
+### Plus media (narration + illustrations)
+
+Set a storage backend and the providers you want:
+
+- `STORAGE_PROVIDER=local` (dev) or `s3` (production — set `S3_*` for AWS S3 / Cloudflare R2).
+- `TTS_PROVIDER=openai|elevenlabs` + `TTS_API_KEY` (or `mock` to test the flow).
+- `IMAGE_PROVIDER=openai|replicate` + `IMAGE_API_KEY` (or `mock`). `IMAGE_MAX` caps images per story.
+
+Long stories are auto-chunked for TTS limits and the audio concatenated. Media is
+generated **best-effort** — a failed image or voice never blocks the story text.
+On serverless (Vercel) the local filesystem is ephemeral, so use `s3`.
 
 ---
 

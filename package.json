@@ -15,6 +15,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
     "story:sample": "tsx scripts/sample-story.ts",
+    "media:sample": "tsx scripts/sample-media.ts",
     "cron:nightly": "tsx scripts/run-nightly.ts"
   },
   "prisma": {
@@ -22,6 +23,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
+    "@aws-sdk/client-s3": "^3.717.0",
     "@auth/prisma-adapter": "^2.7.4",
     "@prisma/client": "^6.1.0",
     "next": "^14.2.35",

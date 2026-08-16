@@ -1,14 +1,17 @@
+import { newKey, putObject } from "../storage";
+import { placeholderSvg } from "./mock-media";
 import type { GeneratedStory } from "./types";
 
 /**
- * Illustration adapter (Plus tier).
+ * Illustration adapter (Plus tier). One soft, storybook image per scene.
+ * Provider-agnostic via IMAGE_PROVIDER:
+ *   - "none"      → skip
+ *   - "mock"      → placeholder SVG cards, to exercise the pipeline
+ *   - "openai"    → OpenAI Images (gpt-image-1)
+ *   - "replicate" → any Replicate image model
  *
- * One soft, storybook-style image per scene. Like narration, this is kept
- * provider-agnostic (IMAGE_PROVIDER + IMAGE_API_KEY) so illustrations are a
- * clean paid add-on that never blocks the core text pipeline.
- *
- * A consistent house style keeps a child's story visually coherent — we prefix
- * every scene prompt with the same style guide so all images feel like one book.
+ * A shared house style is prefixed to every scene so a child's story looks like
+ * one coherent book. IMAGE_MAX caps how many scenes get illustrated (cost).
  */
 
 export interface Illustration {
@@ -32,26 +35,107 @@ export async function illustrateStory(
   const provider = process.env.IMAGE_PROVIDER || "none";
   if (provider === "none") return [];
 
-  const results: Illustration[] = [];
-  for (let i = 0; i < story.scenes.length; i++) {
-    const scene = story.scenes[i];
-    if (!scene.illustrationPrompt) continue;
-    const prompt = buildImagePrompt(scene.illustrationPrompt);
+  const max = Number(process.env.IMAGE_MAX) || 6;
+  const scenes = story.scenes
+    .map((s, i) => ({ i, prompt: s.illustrationPrompt }))
+    .filter((s): s is { i: number; prompt: string } => Boolean(s.prompt))
+    .slice(0, max);
 
-    switch (provider) {
-      case "openai":
-      case "replicate":
-        // Implement the vendor call here, upload the image, push its URL.
-        throw new Error(
-          `IMAGE_PROVIDER="${provider}" selected but not yet implemented. ` +
-            `Add the vendor call in src/lib/story-engine/illustrate.ts.`
-        );
-      default:
-        throw new Error(`Unknown IMAGE_PROVIDER: ${provider}`);
+  const results: Illustration[] = [];
+  for (const scene of scenes) {
+    const prompt = buildImagePrompt(scene.prompt);
+    try {
+      const { bytes, contentType, ext } =
+        provider === "mock"
+          ? { bytes: placeholderSvg(scene.prompt, scene.i), contentType: "image/svg+xml", ext: "svg" }
+          : provider === "openai"
+            ? await genOpenAI(prompt)
+            : provider === "replicate"
+              ? await genReplicate(prompt)
+              : (() => {
+                  throw new Error(`Unknown IMAGE_PROVIDER: ${provider}`);
+                })();
+
+      const stored = await putObject(newKey("images", ext), bytes, contentType);
+      results.push({ sceneIndex: scene.i, url: stored.url, prompt: scene.prompt });
+    } catch (e) {
+      // One failed image shouldn't lose the others (or the story text).
+      console.error(`[illustrate] scene ${scene.i} failed:`, (e as Error).message);
     }
-    // (unreachable until a provider is implemented)
-    void prompt;
-    void results;
   }
   return results;
+}
+
+interface RawImage {
+  bytes: Uint8Array;
+  contentType: string;
+  ext: string;
+}
+
+async function genOpenAI(prompt: string): Promise<RawImage> {
+  const key = process.env.IMAGE_API_KEY;
+  if (!key) throw new Error("IMAGE_API_KEY is not set for openai");
+  const res = await fetch("https://api.openai.com/v1/images/generations", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: process.env.IMAGE_MODEL || "gpt-image-1",
+      prompt,
+      size: "1024x1024",
+      n: 1,
+    }),
+  });
+  if (!res.ok) throw new Error(`OpenAI image failed (${res.status}): ${await res.text()}`);
+  const data = await res.json();
+  const b64 = data?.data?.[0]?.b64_json;
+  if (!b64) throw new Error("OpenAI image returned no data");
+  return { bytes: Uint8Array.from(Buffer.from(b64, "base64")), contentType: "image/png", ext: "png" };
+}
+
+async function genReplicate(prompt: string): Promise<RawImage> {
+  const key = process.env.IMAGE_API_KEY;
+  if (!key) throw new Error("IMAGE_API_KEY is not set for replicate");
+  const model = process.env.IMAGE_MODEL || "black-forest-labs/flux-schnell";
+
+  // Create the prediction.
+  const create = await fetch(`https://api.replicate.com/v1/models/${model}/predictions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+      Prefer: "wait", // ask Replicate to hold the connection until done
+    },
+    body: JSON.stringify({ input: { prompt, aspect_ratio: "1:1" } }),
+  });
+  if (!create.ok) throw new Error(`Replicate create failed (${create.status}): ${await create.text()}`);
+  let prediction = await create.json();
+
+  // Poll if it isn't finished yet.
+  const started = Date.now();
+  while (
+    prediction.status !== "succeeded" &&
+    prediction.status !== "failed" &&
+    prediction.status !== "canceled"
+  ) {
+    if (Date.now() - started > 90_000) throw new Error("Replicate timed out");
+    await new Promise((r) => setTimeout(r, 1500));
+    const poll = await fetch(prediction.urls.get, {
+      headers: { Authorization: `Bearer ${key}` },
+    });
+    prediction = await poll.json();
+  }
+  if (prediction.status !== "succeeded") {
+    throw new Error(`Replicate prediction ${prediction.status}: ${prediction.error ?? ""}`);
+  }
+
+  const output = Array.isArray(prediction.output) ? prediction.output[0] : prediction.output;
+  if (!output) throw new Error("Replicate returned no output");
+  // Download the produced image and re-host it in our storage for a stable URL.
+  const img = await fetch(output);
+  if (!img.ok) throw new Error(`Fetching Replicate output failed (${img.status})`);
+  return {
+    bytes: new Uint8Array(await img.arrayBuffer()),
+    contentType: "image/webp",
+    ext: "webp",
+  };
 }

@@ -109,9 +109,13 @@ Plus price must clear image + audio spend with margin.
 
 ## Suggested roadmap (beyond the MVP)
 
-1. **Plus media providers.** Implement `narrate.ts` (ElevenLabs/OpenAI TTS) and
-   `illustrate.ts` (an image model), with object-storage upload + a CDN.
-2. **Timezone-sharded scheduling** + per-child job queue with retries.
+1. ~~**Plus media providers.**~~ **Done** — `narrate.ts` (OpenAI TTS /
+   ElevenLabs) and `illustrate.ts` (OpenAI Images / Replicate) with a pluggable
+   `storage.ts` (local FS / S3-compatible) and a `mock` provider for testing.
+   Next: wire a CDN in front of the S3 bucket and consider caching a per-child
+   narration voice.
+2. ~~**Timezone-sharded scheduling.**~~ **Done** (`src/lib/schedule.ts`). Next:
+   a per-child job queue with retries for scale.
 3. **Safety second-pass** classifier and a parent report/regenerate flow.
 4. **Gift subscriptions** (grandparents are a huge segment).
 5. **Weekly printable keepsake PDF** of the family's favourite story.
