@@ -16,7 +16,8 @@
     "db:studio": "prisma studio",
     "story:sample": "tsx scripts/sample-story.ts",
     "media:sample": "tsx scripts/sample-media.ts",
-    "cron:nightly": "tsx scripts/run-nightly.ts"
+    "cron:nightly": "tsx scripts/run-nightly.ts",
+    "db:demo": "tsx scripts/demo-seed.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
