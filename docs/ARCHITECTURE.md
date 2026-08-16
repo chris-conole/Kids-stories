@@ -56,8 +56,19 @@ past stories. Cheap, and enough for characters and threads to persist.
   drop anything unsafe.
 - Structured JSON + Zod validation means a malformed or off-format generation
   fails loudly rather than shipping garbage.
-- Future hardening: a second-pass safety classifier before a story is marked
-  `READY`, and a parent "report this story" action that quarantines + regenerates.
+- **Second-pass safety review (implemented, `story-engine/safety.ts`).** Every
+  story is independently classified by a separate, cheap, low-temperature model
+  (Haiku by default) before it can be marked `READY`. `composeStory` regenerates
+  with a fresh seed up to `SAFETY_MAX_ATTEMPTS` times; if no draft clears review
+  it throws `SafetyError` and the nightly job records the story as **`BLOCKED`**
+  (never delivered, and not auto-retried on later runs). The classifier also
+  enforces the parent's free-text "avoid" list (`parent-avoid`).
+- **Fail-closed by design.** An unsafe verdict blocks, and a classifier that
+  keeps erroring is treated as unsafe — shipping unvetted content to a child is
+  worse than a missed story. Toggle with `SAFETY_CHECK=off` for local testing.
+- Future hardening: a parent "report this story" action that quarantines +
+  regenerates, and a gentle evergreen fallback so a blocked night still has a
+  story to read.
 
 ## Scheduling for real bedtimes (implemented)
 
@@ -116,7 +127,8 @@ Plus price must clear image + audio spend with margin.
    narration voice.
 2. ~~**Timezone-sharded scheduling.**~~ **Done** (`src/lib/schedule.ts`). Next:
    a per-child job queue with retries for scale.
-3. **Safety second-pass** classifier and a parent report/regenerate flow.
+3. ~~**Safety second-pass classifier.**~~ **Done** (`story-engine/safety.ts`,
+   fail-closed, `BLOCKED` status). Next: a parent report/regenerate flow.
 4. **Gift subscriptions** (grandparents are a huge segment).
 5. **Weekly printable keepsake PDF** of the family's favourite story.
 6. **Series mode** — multi-night arcs ("Amara and the Lantern Market, night 3").

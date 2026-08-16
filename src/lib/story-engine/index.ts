@@ -1,6 +1,12 @@
 import { generateStory, STORY_MODEL } from "./generate";
 import { illustrateStory, type Illustration } from "./illustrate";
 import { narrateStory, type NarrationResult } from "./narrate";
+import {
+  SafetyError,
+  classifyStory,
+  safetyEnabled,
+  type SafetyVerdict,
+} from "./safety";
 import { countWords, scenesToMarkdown } from "./seeds";
 import {
   ContinuitySchema,
@@ -12,6 +18,8 @@ import {
 export * from "./types";
 export { makeNightlySeed } from "./seeds";
 export { targetWordCount } from "./prompt";
+export { SafetyError, classifyStory, safetyEnabled } from "./safety";
+export type { SafetyVerdict, SafetyCategory } from "./safety";
 
 export interface ComposedStory {
   model: string;
@@ -24,24 +32,72 @@ export interface ComposedStory {
   raw: GeneratedStory;
   narration: NarrationResult | null;
   illustrations: Illustration[];
+  safety: SafetyVerdict;
+  attempts: number;
 }
 
 export interface ComposeOptions {
   withNarration: boolean; // Plus tier
   withIllustrations: boolean; // Plus tier
+  // How many times to (re)generate if the safety classifier blocks a draft.
+  maxSafetyAttempts?: number;
 }
 
 /**
- * Compose one complete night for a child: text always, plus optional audio and
- * illustrations for the Plus tier. Media is generated best-effort — if a media
- * provider fails, the story text still ships (a bedtime story with no picture
- * beats no bedtime story).
+ * Generate a story that passes the second-pass safety classifier. Each attempt
+ * uses a fresh seed so a reroll actually differs. Throws SafetyError if no draft
+ * clears review within the allowed attempts, so the caller can block (not ship)
+ * the story. When safety is disabled (SAFETY_CHECK=off) a single draft is used.
+ */
+async function generateSafeStory(
+  req: StoryRequest,
+  maxAttempts: number
+): Promise<{ story: GeneratedStory; safety: SafetyVerdict; attempts: number }> {
+  const ctx = { ageBand: req.child.ageBand, avoid: req.preferences.avoid };
+
+  if (!safetyEnabled()) {
+    const story = await generateStory(req);
+    return { story, safety: { safe: true, categories: [] }, attempts: 1 };
+  }
+
+  let lastVerdict: SafetyVerdict = { safe: false, categories: [] };
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    // Vary the seed on rerolls so we don't re-draw the same blocked story.
+    const attemptReq =
+      attempt === 1 ? req : { ...req, seed: `${req.seed} · reroll-${attempt}` };
+    const story = await generateStory(attemptReq);
+    const safety = await classifyStory(story, ctx);
+    if (safety.safe) return { story, safety, attempts: attempt };
+
+    lastVerdict = safety;
+    console.warn(
+      `[story-engine] draft blocked (attempt ${attempt}/${maxAttempts}): ` +
+        `${safety.categories.join(", ") || "unspecified"} — ${safety.reason ?? ""}`
+    );
+  }
+
+  throw new SafetyError(
+    `Story blocked by safety review after ${maxAttempts} attempt(s): ${lastVerdict.reason ?? "unsafe"}`,
+    lastVerdict.categories
+  );
+}
+
+/**
+ * Compose one complete night for a child: a safety-reviewed story (text always),
+ * plus optional audio and illustrations for the Plus tier. Media is generated
+ * best-effort — if a media provider fails, the story text still ships (a bedtime
+ * story with no picture beats no bedtime story). If the story cannot pass safety
+ * review, composeStory throws SafetyError and nothing is shipped.
  */
 export async function composeStory(
   req: StoryRequest,
   opts: ComposeOptions
 ): Promise<ComposedStory> {
-  const story = await generateStory(req);
+  const envAttempts = Number(process.env.SAFETY_MAX_ATTEMPTS);
+  const maxAttempts =
+    opts.maxSafetyAttempts ??
+    (Number.isFinite(envAttempts) && envAttempts >= 1 ? envAttempts : 2);
+  const { story, safety, attempts } = await generateSafeStory(req, maxAttempts);
   const bodyMarkdown = scenesToMarkdown(story);
   const wordCount = countWords(bodyMarkdown);
   const readMinutes = Math.max(1, Math.round(wordCount / 135));
@@ -76,6 +132,8 @@ export async function composeStory(
     raw: story,
     narration,
     illustrations,
+    safety,
+    attempts,
   };
 }
 

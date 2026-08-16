@@ -4,6 +4,7 @@ import { planFor } from "./plans";
 import { sendStoryReadyEmail } from "./email";
 import { isChildDue } from "./schedule";
 import {
+  SafetyError,
   composeStory,
   makeNightlySeed,
   StoryPreferencesSchema,
@@ -29,6 +30,7 @@ export interface NightlyRunResult {
   generated: number;
   skipped: number;
   failed: number;
+  blocked: number; // rejected by the safety review
   details: Array<{ childId: string; status: string; error?: string }>;
 }
 
@@ -71,6 +73,7 @@ export async function runNightly(opts?: {
     generated: 0,
     skipped: 0,
     failed: 0,
+    blocked: 0,
     details: [],
   };
 
@@ -135,7 +138,10 @@ export async function runNightly(opts?: {
             seed,
             model: composed.model,
             themeOfNight: prefs.themes[0],
-            promptMeta: { plan: plan.id },
+            promptMeta: {
+              plan: plan.id,
+              safety: { attempts: composed.attempts, categories: composed.safety.categories },
+            },
           },
         });
 
@@ -191,16 +197,24 @@ export async function runNightly(opts?: {
       result.generated++;
       result.details.push({ childId: child.id, status: "generated" });
     } catch (e) {
-      result.failed++;
       const message = (e as Error).message;
-      result.details.push({ childId: child.id, status: "failed", error: message });
+      // A safety block is a content decision, not a technical failure: mark it
+      // BLOCKED (never delivered) and do not auto-retry on later runs.
+      const isBlock = e instanceof SafetyError;
+      if (isBlock) {
+        result.blocked++;
+        result.details.push({ childId: child.id, status: "blocked", error: message });
+      } else {
+        result.failed++;
+        result.details.push({ childId: child.id, status: "failed", error: message });
+      }
       await prisma.story
         .update({
           where: { childId_forDate: { childId: child.id, forDate } },
-          data: { status: "FAILED", error: message },
+          data: { status: isBlock ? "BLOCKED" : "FAILED", error: message },
         })
         .catch(() => {});
-      console.error(`[nightly] child ${child.id} failed:`, message);
+      console.error(`[nightly] child ${child.id} ${isBlock ? "blocked" : "failed"}:`, message);
     }
   }
 

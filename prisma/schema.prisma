@@ -133,7 +133,8 @@ enum StoryStatus {
   GENERATING
   READY
   DELIVERED
-  FAILED
+  FAILED     // technical failure (generation/persistence error)
+  BLOCKED    // rejected by the second-pass safety review; never delivered
 }
 
 model Story {

@@ -31,8 +31,9 @@ This is the part that makes a story feel written *for this child*.
 1. **The recipe** (`types.ts`) — a validated `StoryPreferences` object per child: reading level, tone, themes, values to gently encourage, companions (friends/pets/toys), favourite things, things to avoid, wind-down endings, and whether to serialise adventures.
 2. **The prompt** (`prompt.ts`) — a carefully designed system prompt encoding safety rules, reading-level control, **bedtime wind-down pacing**, and continuity, plus a per-night user prompt built from the recipe and a fresh randomness **seed** so no two nights repeat.
 3. **Generation** (`generate.ts`) — calls Claude, expects structured JSON (title, scenes, synopsis, continuity note), and validates it with Zod.
-4. **Media adapters** (`narrate.ts`, `illustrate.ts`) — real, provider-agnostic media for the Plus tier: narration via **OpenAI TTS** or **ElevenLabs**, illustrations via **OpenAI Images** or **Replicate**, plus a `mock` provider to exercise the flow without keys. Generated files go through a storage layer (`storage.ts`: local FS for dev, **S3/R2** for production). Text always ships even if media fails.
-5. **Compose + continuity** (`index.ts`) — assembles the night and folds a short summary into the child's rolling "story bible" so recurring characters and past adventures carry over.
+4. **Safety review** (`safety.ts`) — every story is independently re-classified by a cheap, fast model before it can ship. Unsafe drafts trigger a regenerate (up to `SAFETY_MAX_ATTEMPTS`); if none pass, the story is marked `BLOCKED` and never delivered. **Fail-closed**: a classifier that can't run blocks rather than passes.
+5. **Media adapters** (`narrate.ts`, `illustrate.ts`) — real, provider-agnostic media for the Plus tier: narration via **OpenAI TTS** or **ElevenLabs**, illustrations via **OpenAI Images** or **Replicate**, plus a `mock` provider to exercise the flow without keys. Generated files go through a storage layer (`storage.ts`: local FS for dev, **S3/R2** for production). Text always ships even if media fails.
+6. **Compose + continuity** (`index.ts`) — assembles the night and folds a short summary into the child's rolling "story bible" so recurring characters and past adventures carry over.
 
 **Try it in 30 seconds** (no DB or web app needed):
 
