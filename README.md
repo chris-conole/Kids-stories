@@ -123,4 +123,10 @@ npm run cron:nightly
 4. **Subscribe** (Stripe, 7-day trial) to receive a new story every night.
 5. **Dashboard**: nightly stories land in the **library**, readable in-app or by email; **Plus** adds illustrations + audio.
 
+## Deploying to a live URL
+
+See **`docs/DEPLOY.md`** for a step-by-step guide to putting Dreamloom online
+with Vercel + Neon (Postgres). The build runs database migrations automatically
+(`vercel-build` → `prisma migrate deploy`), so a push is all it takes to ship.
+
 See `docs/ARCHITECTURE.md` for the deeper design, safety model, cost notes, and a suggested roadmap.
